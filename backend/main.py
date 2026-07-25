@@ -47,14 +47,22 @@ def _resolve_configured_path(value: str, default: Path) -> Path:
 STORAGE_DIR = _resolve_configured_path(os.getenv("STORAGE_DIR", "storage"), BASE_DIR / "storage")
 TASK_STORAGE_DIR = STORAGE_DIR / "tasks"
 DATABASE_PATH = _resolve_configured_path(os.getenv("DATABASE_PATH", "app.db"), BASE_DIR / "app.db")
-STORAGE_DIR.mkdir(parents=True, exist_ok=True)
-TASK_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
-DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
 TASK_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="video-task")
 VOICE_PREVIEW_DIR = STORAGE_DIR / "voice-previews"
 DAILY_VIDEO_LIMIT = 1
 BEIJING_TIMEZONE = timezone(timedelta(hours=8))
 DEFAULT_USER_ID = "legacy-anonymous-user"
+
+
+def ensure_runtime_directories() -> None:
+    """Create and validate all directories needed by the API process."""
+    for directory in (STORAGE_DIR, TASK_STORAGE_DIR, VOICE_PREVIEW_DIR, DATABASE_PATH.parent):
+        directory.mkdir(parents=True, exist_ok=True)
+        if not directory.is_dir():
+            raise RuntimeError(f"Configured runtime path is not a directory: {directory}")
+
+
+ensure_runtime_directories()
 
 
 def get_connection() -> sqlite3.Connection:
@@ -146,7 +154,7 @@ class VoicePreviewRequest(BaseModel):
 
 
 app = FastAPI(title="老板AI短视频助手 API", version="0.1.0")
-configured_origins = os.getenv("FRONTEND_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
+configured_origins = os.getenv("FRONTEND_ORIGINS", "")
 allowed_origins = [origin.strip().rstrip("/") for origin in configured_origins.split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,
@@ -159,6 +167,7 @@ app.add_middleware(
 
 @app.on_event("startup")
 def on_startup() -> None:
+    ensure_runtime_directories()
     init_database()
     TASK_EXECUTOR.submit(_precache_voice_previews)
 

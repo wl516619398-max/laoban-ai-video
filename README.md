@@ -75,9 +75,11 @@ npm run dev
 
 如果后端不是运行在 `http://localhost:8000`，修改 `frontend/.env.local` 中的 `NEXT_PUBLIC_API_URL`。
 
-## 公网测试部署（V1.4）
+## 公网部署准备（V1.5）
 
 当前版本适合部署到一台有持久化磁盘的云服务器或容器实例，前端和后端可以分别部署。SQLite 和本地 `storage/` 依赖持久化磁盘，不建议直接部署到无状态 Serverless 环境。
+
+项目根目录的 `.env.example` 是完整配置清单；实际部署时仍然要分别在 `frontend/.env.production` 和 `backend/.env` 中配置对应变量。不要把真实 API Key 提交到 Git。
 
 ### 前端部署步骤
 
@@ -129,7 +131,9 @@ copy .env.example .env   # macOS / Linux 使用 cp .env.example .env
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-云平台如果通过环境变量提供端口，将命令中的 `8000` 替换为平台端口。
+云平台如果通过环境变量提供端口，将命令中的 `8000` 替换为平台端口。Windows、Linux 和容器环境都可以使用这条生产启动命令；不要使用 `--reload`。
+
+后端单独部署说明见 [`backend/README.md`](backend/README.md)。
 
 ### 公网环境变量
 

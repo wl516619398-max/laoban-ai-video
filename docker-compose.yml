@@ -1,0 +1,21 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - ./backend/.env
+    environment:
+      # 容器内使用命名卷，避免容器重建时丢失数据。
+      STORAGE_DIR: /app/storage
+      DATABASE_PATH: /app/data/app.db
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - video_storage:/app/storage
+      - sqlite_data:/app/data
+    restart: unless-stopped
+
+volumes:
+  video_storage:
+  sqlite_data:
