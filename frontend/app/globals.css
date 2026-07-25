@@ -1,0 +1,47 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  color: #17241f;
+  background: #f7fbf8;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: #f7fbf8;
+  font-family: var(--font-sans);
+}
+
+button, input, select, textarea { font: inherit; }
+
+::selection { color: #fff; background: #0e7548; }
+
+.mesh {
+  background-image: radial-gradient(rgba(14, 117, 72, 0.14) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.paper-line {
+  background-image: linear-gradient(rgba(14, 117, 72, 0.08) 1px, transparent 1px);
+  background-size: 100% 32px;
+}
+
+.field {
+  width: 100%;
+  border: 1px solid #d6e6db;
+  border-radius: 0.875rem;
+  background: #fbfdfb;
+  padding: 0.8rem 0.95rem;
+  color: #17241f;
+  outline: none;
+  transition: border-color 160ms, box-shadow 160ms;
+}
+
+.field::placeholder { color: #a0b2a8; }
+.field:focus { border-color: #0e7548; box-shadow: 0 0 0 3px rgba(14, 117, 72, 0.12); }
+
