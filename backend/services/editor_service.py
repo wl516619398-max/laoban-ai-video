@@ -441,7 +441,7 @@ def prepend_cover_to_video(cover_path: Path, body_path: Path, output_path: Path)
 
 
 def _concat_line(path: Path) -> str:
-    return f"file '{str(path).replace("'", "'\\''")}'"
+    return "file-" + str(path).replace("\\", "_")
 
 
 def render_video_segments(

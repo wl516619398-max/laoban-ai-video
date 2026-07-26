@@ -9,3 +9,4 @@ backend/storage/*
 backend/*.db
 frontend/.env.local
 backend/.env
+frontend/.pnpmrc
