@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "老板AI短视频助手",
-  description: "让县城好生意，被更多人看见。",
+  title: "AI智能视频助手",
+  description: "帮助小县城老板快速生成短视频内容",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
@@ -13,4 +13,3 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     </html>
   );
 }
-

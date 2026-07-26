@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 import time
@@ -37,6 +38,8 @@ from services.voice.tts_service import (
 
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
+logger = logging.getLogger("boss_ai_video")
+logger.setLevel(logging.INFO)
 
 
 def _resolve_configured_path(value: str, default: Path) -> Path:
@@ -45,18 +48,21 @@ def _resolve_configured_path(value: str, default: Path) -> Path:
 
 
 STORAGE_DIR = _resolve_configured_path(os.getenv("STORAGE_DIR", "storage"), BASE_DIR / "storage")
+UPLOADS_DIR = STORAGE_DIR / "uploads"
 TASK_STORAGE_DIR = STORAGE_DIR / "tasks"
 DATABASE_PATH = _resolve_configured_path(os.getenv("DATABASE_PATH", "app.db"), BASE_DIR / "app.db")
 TASK_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="video-task")
 VOICE_PREVIEW_DIR = STORAGE_DIR / "voice-previews"
-DAILY_VIDEO_LIMIT = 1
+APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+DAILY_VIDEO_LIMIT = 999 if APP_ENV in {"development", "dev", "test", "testing"} else 1
+SUCCESS_STATUSES = ("success", "completed")
 BEIJING_TIMEZONE = timezone(timedelta(hours=8))
 DEFAULT_USER_ID = "legacy-anonymous-user"
 
 
 def ensure_runtime_directories() -> None:
     """Create and validate all directories needed by the API process."""
-    for directory in (STORAGE_DIR, TASK_STORAGE_DIR, VOICE_PREVIEW_DIR, DATABASE_PATH.parent):
+    for directory in (STORAGE_DIR, UPLOADS_DIR, TASK_STORAGE_DIR, VOICE_PREVIEW_DIR, DATABASE_PATH.parent):
         directory.mkdir(parents=True, exist_ok=True)
         if not directory.is_dir():
             raise RuntimeError(f"Configured runtime path is not a directory: {directory}")
@@ -220,6 +226,7 @@ def create_voice_preview(request: VoicePreviewRequest) -> FileResponse:
 
 
 VIDEO_STATUS_LABELS = {
+    "pending": "排队中",
     "generating_voice": "生成配音",
     "voice_ready": "配音完成",
     "generating_subtitles": "生成字幕",
@@ -228,6 +235,7 @@ VIDEO_STATUS_LABELS = {
     "generating_cover": "生成封面",
     "composing_final": "合成最终视频",
     "completed": "生成完成",
+    "success": "生成完成",
     "failed": "生成失败",
 }
 
@@ -237,9 +245,10 @@ def _beijing_date() -> str:
 
 
 def _daily_video_count(connection: sqlite3.Connection, user_id: str) -> int:
+    placeholders = ",".join("?" for _ in SUCCESS_STATUSES)
     return int(connection.execute(
-        "SELECT COUNT(*) FROM video_tasks WHERE user_id = ? AND created_date = ?",
-        (user_id, _beijing_date()),
+        f"SELECT COUNT(*) FROM video_tasks WHERE user_id = ? AND created_date = ? AND status IN ({placeholders})",
+        (user_id, _beijing_date(), *SUCCESS_STATUSES),
     ).fetchone()[0])
 
 
@@ -247,6 +256,7 @@ def _usage_payload(connection: sqlite3.Connection, user_id: str) -> dict[str, in
     used_count = _daily_video_count(connection, user_id)
     return {
         "user_id": user_id,
+        "app_env": APP_ENV,
         "daily_limit": DAILY_VIDEO_LIMIT,
         "used_count": used_count,
         "remaining_count": max(0, DAILY_VIDEO_LIMIT - used_count),
@@ -319,15 +329,26 @@ def _get_upload_records(material_ids: list[str]) -> list[sqlite3.Row]:
     return [by_id[material_id] for material_id in material_ids]
 
 
+def _resolve_upload_path(stored_name: str) -> Path:
+    """Support new uploads/ storage while keeping older MVP uploads readable."""
+    current_path = UPLOADS_DIR / stored_name
+    if current_path.is_file():
+        return current_path
+    return STORAGE_DIR / stored_name
+
+
 def _process_voice_task(task_id: str, material_ids: list[str], script: str, voice: str) -> None:
     try:
+        _update_video_task(task_id, "generating_voice")
         task_dir = TASK_STORAGE_DIR / task_id
         voice_path = task_dir / "voice.mp3"
         generated_voice = generate_voice_mp3(script, voice_path, voice=voice)
         _update_video_task(task_id, "voice_ready", voice_path=str(generated_voice))
     except (VoiceGenerationError, ValueError, OSError) as error:
+        logger.exception("generate_failed task_id=%s stage=voice", task_id)
         _update_video_task(task_id, "failed", error=str(error))
     except Exception:
+        logger.exception("generate_failed task_id=%s stage=voice", task_id)
         _update_video_task(task_id, "failed", error="视频制作任务失败，请稍后重试")
 
 
@@ -342,7 +363,7 @@ def _process_render_task(task_id: str) -> None:
             return
         material_ids = json.loads(task["material_ids_json"] or "[]") or [task["material_id"]]
         records = _get_upload_records(material_ids)
-        material_paths = [BASE_DIR / "storage" / row["stored_name"] for row in records]
+        material_paths = [_resolve_upload_path(row["stored_name"]) for row in records]
         voice_path = Path(task["voice_path"])
         task_dir = TASK_STORAGE_DIR / task_id
         output_path = task_dir / "final.mp4"
@@ -378,21 +399,29 @@ def _process_render_task(task_id: str) -> None:
         cover_title_path.unlink(missing_ok=True)
         subtitle_path.unlink(missing_ok=True)
         time.sleep(0.4)
-        _update_video_task(task_id, "completed", video_path=str(output_path))
+        _update_video_task(task_id, "success", video_path=str(output_path))
+        logger.info("generate_success task_id=%s stage=render", task_id)
     except (VoiceGenerationError, VideoRenderError, ValueError, OSError) as error:
+        logger.exception("generate_failed task_id=%s stage=render", task_id)
         _update_video_task(task_id, "failed", error=str(error))
     except Exception:
+        logger.exception("generate_failed task_id=%s stage=render", task_id)
         _update_video_task(task_id, "failed", error="视频混剪失败，请稍后重试")
 
 
 @app.post("/upload")
-async def upload_video(file: UploadFile = File(...)) -> dict[str, str | int]:
-    file_id = uuid.uuid4().hex[:12]
-    filename = file.filename or "未命名素材"
-    created_at = datetime.now(timezone.utc).isoformat()
+async def upload_video(file: UploadFile = File(...)) -> dict[str, str | bool]:
+    filename = Path(file.filename or "").name
     suffix = Path(filename).suffix.lower()
-    stored_name = f"{file_id}{suffix}"
-    stored_path = STORAGE_DIR / stored_name
+    if suffix not in {".mp4", ".mov"}:
+        await file.close()
+        raise HTTPException(status_code=400, detail="仅支持 MP4 或 MOV 格式的视频素材")
+
+    file_id = f"{uuid.uuid4().hex[:12]}{suffix}"
+    created_at = datetime.now(timezone.utc).isoformat()
+    stored_name = file_id
+    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    stored_path = UPLOADS_DIR / stored_name
     file_size = 0
     try:
         with stored_path.open("wb") as output_file:
@@ -417,21 +446,20 @@ async def upload_video(file: UploadFile = File(...)) -> dict[str, str | int]:
                 created_at,
             ),
         )
-        material_count = connection.execute("SELECT COUNT(*) FROM uploads").fetchone()[0]
         connection.commit()
     finally:
         connection.close()
 
     return {
+        "success": True,
         "file_id": file_id,
         "filename": filename,
-        "created_at": created_at,
-        "material_count": material_count,
     }
 
 
 @app.post("/generate")
 def generate_video_script(request: GenerateRequest) -> dict[str, Any]:
+    logger.info("generate_start user_id=%s material_id=%s stage=copy", request.user_id, request.material_id)
     connection = get_connection()
     try:
         upload = connection.execute(
@@ -440,17 +468,24 @@ def generate_video_script(request: GenerateRequest) -> dict[str, Any]:
     finally:
         connection.close()
     if upload is None:
+        logger.warning("generate_failed user_id=%s material_id=%s stage=upload", request.user_id, request.material_id)
         raise HTTPException(status_code=404, detail="素材不存在，请重新上传")
 
     try:
-        return generate_video_copy(
+        result = generate_video_copy(
             shop_name=request.shop_name,
             industry=request.industry,
             city=request.city,
             specialty=request.specialty,
         )
+        logger.info("generate_success user_id=%s material_id=%s stage=copy", request.user_id, request.material_id)
+        return result
     except DeepSeekServiceError as error:
+        logger.exception("generate_failed user_id=%s material_id=%s stage=copy", request.user_id, request.material_id)
         raise HTTPException(status_code=502, detail=str(error)) from error
+    except Exception as error:
+        logger.exception("generate_failed user_id=%s material_id=%s stage=copy", request.user_id, request.material_id)
+        raise HTTPException(status_code=502, detail=str(error) or "AI 文案生成失败，请稍后重试") from error
 
 
 @app.post("/video-tasks", status_code=202)
@@ -474,14 +509,20 @@ def create_video_task(request: VideoTaskRequest) -> dict[str, Any]:
         created_date = _beijing_date()
         connection.execute(
             "INSERT INTO video_tasks (task_id, material_id, material_ids_json, script, cover_title, shop_name, tts_voice, user_id, created_date, downloaded, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (task_id, material_ids[0], json.dumps(material_ids, ensure_ascii=False), request.script, request.title, request.shop_name.strip() or "未命名店铺", request.voice, request.user_id, created_date, 0, "generating_voice", now, now),
+            (task_id, material_ids[0], json.dumps(material_ids, ensure_ascii=False), request.script, request.title, request.shop_name.strip() or "未命名店铺", request.voice, request.user_id, created_date, 0, "pending", now, now),
         )
         connection.commit()
         row = connection.execute("SELECT * FROM video_tasks WHERE task_id = ?", (task_id,)).fetchone()
     finally:
         connection.close()
 
-    TASK_EXECUTOR.submit(_process_voice_task, task_id, material_ids, request.script, request.voice)
+    logger.info("generate_start task_id=%s user_id=%s stage=video", task_id, request.user_id)
+    try:
+        TASK_EXECUTOR.submit(_process_voice_task, task_id, material_ids, request.script, request.voice)
+    except Exception as error:
+        logger.exception("generate_failed task_id=%s user_id=%s stage=submit", task_id, request.user_id)
+        _update_video_task(task_id, "failed", error=str(error) or "视频制作任务提交失败，请稍后重试")
+        raise HTTPException(status_code=500, detail="视频制作任务提交失败，请稍后重试") from error
     return _video_task_payload(row)
 
 
@@ -507,7 +548,7 @@ def render_video_task(task_id: str) -> dict[str, str]:
         connection.close()
     if row is None:
         raise HTTPException(status_code=404, detail="视频制作任务不存在")
-    if row["status"] == "completed":
+    if row["status"] in {"success", "completed"}:
         return {"status": "生成完成"}
     if row["status"] != "voice_ready":
         raise HTTPException(status_code=409, detail="配音尚未完成，请稍后重试")

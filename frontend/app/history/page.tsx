@@ -2,8 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-
-const API_URL = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
+import { getApiUrl } from "../../lib/api";
 const USER_ID_STORAGE_KEY = "boss-ai-anonymous-user-id";
 
 function getOrCreateAnonymousUserId() {
@@ -24,6 +23,7 @@ type HistoryItem = {
   video_url?: string;
   voice_label?: string;
   download_status?: string;
+  error?: string | null;
 };
 
 function formatDate(value: string) {
@@ -41,7 +41,7 @@ export default function HistoryPage() {
     const loadHistory = async () => {
       try {
         const userId = getOrCreateAnonymousUserId();
-        const response = await fetch(`${API_URL}/video-tasks?user_id=${encodeURIComponent(userId)}`);
+        const response = await fetch(`${getApiUrl()}/video-tasks?user_id=${encodeURIComponent(userId)}`);
         const payload = (await response.json().catch(() => ({}))) as { items?: HistoryItem[] };
         if (!response.ok) throw new Error("历史作品暂时无法加载，请稍后重试");
         setItems(payload.items || []);
@@ -74,11 +74,11 @@ export default function HistoryPage() {
         {!loading && !error && !items.length && <div className="mt-10 rounded-3xl border border-dashed border-[#b8d6c1] bg-white p-12 text-center"><p className="text-lg font-bold">还没有生成作品</p><p className="mt-2 text-sm text-[#607d6b]">完成第一条短视频后，它会出现在这里。</p><Link href="/" className="mt-6 inline-flex rounded-xl bg-[#f29b4b] px-5 py-3 text-sm font-bold text-white">开始生成</Link></div>}
 
         {!!items.length && <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{items.map((item) => {
-          const videoUrl = item.video_url ? `${API_URL}${item.video_url}` : "";
+          const videoUrl = item.video_url ? `${getApiUrl()}${item.video_url}` : "";
           const completed = Boolean(videoUrl);
           return <article key={item.task_id} className="overflow-hidden rounded-[1.5rem] border border-[#d9e9df] bg-white shadow-sm">
             <div className="relative aspect-[9/16] bg-[#e4f7ea]">{videoUrl ? <video muted preload="metadata" src={videoUrl} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center p-6 text-center text-sm font-semibold text-[#0e7548]">视频正在制作中</div>}<span className={`absolute left-3 top-3 rounded-full px-3 py-1.5 text-xs font-bold ${completed ? "bg-[#dff4e4] text-[#0e7548]" : "bg-white/90 text-[#a65e1e]"}`}>{item.status_label}</span></div>
-            <div className="p-5"><p className="text-xs font-semibold text-[#769282]">{item.shop_name}</p><h2 className="mt-2 line-clamp-2 text-lg font-bold leading-7 text-[#173a2b]">{item.plan_title}</h2><p className="mt-2 text-xs text-[#8aa095]">{formatDate(item.created_at)}</p><div className="mt-3 grid grid-cols-2 gap-2 text-xs text-[#607d6b]"><span>声音：{item.voice_label || "默认声音"}</span><span>下载：{item.download_status || "未下载"}</span></div><div className="mt-5 flex gap-2"><a href={videoUrl || undefined} target={videoUrl ? "_blank" : undefined} rel={videoUrl ? "noreferrer" : undefined} className={`flex-1 rounded-xl px-3 py-2.5 text-center text-sm font-bold ${videoUrl ? "bg-[#0e7548] text-white hover:bg-[#095c38]" : "pointer-events-none bg-[#e6efe8] text-[#91a99a]"}`}>播放</a><a href={videoUrl ? `${videoUrl}${videoUrl.includes("?") ? "&" : "?"}download=1` : undefined} download="老板AI短视频.mp4" aria-disabled={!videoUrl} className={`flex-1 rounded-xl border px-3 py-2.5 text-center text-sm font-bold ${videoUrl ? "border-[#0e7548] text-[#0e7548] hover:bg-[#edf9f0]" : "pointer-events-none border-[#d9e9df] text-[#91a99a]"}`}>下载</a></div></div>
+            <div className="p-5"><p className="text-xs font-semibold text-[#769282]">{item.shop_name}</p><h2 className="mt-2 line-clamp-2 text-lg font-bold leading-7 text-[#173a2b]">{item.plan_title}</h2><p className="mt-2 text-xs text-[#8aa095]">{formatDate(item.created_at)}</p><div className="mt-3 grid grid-cols-2 gap-2 text-xs text-[#607d6b]"><span>声音：{item.voice_label || "默认声音"}</span><span>下载：{item.download_status || "未下载"}</span></div>{item.status === "failed" && <p className="mt-3 rounded-xl bg-[#fff0eb] px-3 py-2 text-xs leading-5 text-[#b94c32]">{item.error || "视频生成失败，请稍后重试。"}</p>}<div className="mt-5 flex gap-2"><a href={videoUrl || undefined} target={videoUrl ? "_blank" : undefined} rel={videoUrl ? "noreferrer" : undefined} className={`flex-1 rounded-xl px-3 py-2.5 text-center text-sm font-bold ${videoUrl ? "bg-[#0e7548] text-white hover:bg-[#095c38]" : "pointer-events-none bg-[#e6efe8] text-[#91a99a]"}`}>播放</a><a href={videoUrl ? `${videoUrl}${videoUrl.includes("?") ? "&" : "?"}download=1` : undefined} download="老板AI短视频.mp4" aria-disabled={!videoUrl} className={`flex-1 rounded-xl border px-3 py-2.5 text-center text-sm font-bold ${videoUrl ? "border-[#0e7548] text-[#0e7548] hover:bg-[#edf9f0]" : "pointer-events-none border-[#d9e9df] text-[#91a99a]"}`}>下载</a></div></div>
           </article>;
         })}</div>}
       </section>

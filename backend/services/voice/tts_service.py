@@ -13,53 +13,46 @@ class VoiceGenerationError(Exception):
 
 
 SUPPORTED_VOICES = {
-    "zh-CN-YunjianNeural",
+    # 精选男声：保留明显不同的语气，避免把云厂商全部声音直接暴露给用户。
     "zh-CN-YunxiNeural",
+    "zh-CN-YunjianNeural",
     "zh-CN-YunyangNeural",
     "zh-CN-YunyeNeural",
     "zh-CN-YunhaoNeural",
     "zh-CN-YunfengNeural",
-    "zh-CN-YunyiNeural",
-    "zh-CN-YunxiaNeural",
-    "zh-CN-YunfanNeural",
-    "zh-CN-YunzheNeural",
+    # 精选女声。
     "zh-CN-XiaoxiaoNeural",
-    "zh-CN-XiaoyiNeural",
-    "zh-CN-XiaohanNeural",
     "zh-CN-XiaomoNeural",
+    "zh-CN-XiaoyiNeural",
     "zh-CN-XiaoxuanNeural",
+    "zh-CN-XiaohanNeural",
     "zh-CN-XiaoruiNeural",
-    "zh-CN-XiaoshuangNeural",
-    "zh-CN-XiaoyouNeural",
-    "zh-CN-XiaozhenNeural",
-    "zh-CN-XiaomengNeural",
 }
 VOICE_PREVIEW_TEXT = "你好，我是智能视频助手。我可以帮助老板快速生成短视频内容。"
 VOICE_DISPLAY_NAMES = {
-    "zh-CN-YunjianNeural": "稳重大叔",
-    "zh-CN-YunxiNeural": "年轻老板",
-    "zh-CN-YunyangNeural": "热情销售",
-    "zh-CN-YunyeNeural": "新闻播报",
-    "zh-CN-YunhaoNeural": "真实口播",
-    "zh-CN-YunfengNeural": "专业介绍",
-    "zh-CN-YunyiNeural": "磁性男声",
-    "zh-CN-YunxiaNeural": "活力男声",
-    "zh-CN-YunfanNeural": "温和男声",
-    "zh-CN-YunzheNeural": "讲故事男声",
-    "zh-CN-XiaoxiaoNeural": "温柔客服",
-    "zh-CN-XiaoyiNeural": "活力女生",
-    "zh-CN-XiaohanNeural": "甜美女声",
-    "zh-CN-XiaomoNeural": "专业介绍",
-    "zh-CN-XiaoxuanNeural": "邻家姐姐",
-    "zh-CN-XiaoruiNeural": "亲切老板娘",
-    "zh-CN-XiaoshuangNeural": "新闻播报",
-    "zh-CN-XiaoyouNeural": "知性女生",
-    "zh-CN-XiaozhenNeural": "热情销售",
-    "zh-CN-XiaomengNeural": "轻松聊天",
+    "zh-CN-YunxiNeural": "老板亲切声",
+    "zh-CN-YunjianNeural": "沉稳专业声",
+    "zh-CN-YunyangNeural": "活力年轻声",
+    "zh-CN-YunyeNeural": "故事分享声",
+    "zh-CN-YunhaoNeural": "真实口播声",
+    "zh-CN-YunfengNeural": "清晰讲解声",
+    "zh-CN-XiaoxiaoNeural": "温柔客服声",
+    "zh-CN-XiaomoNeural": "知性介绍声",
+    "zh-CN-XiaoyiNeural": "活泼营销声",
+    "zh-CN-XiaoxuanNeural": "邻家亲切声",
+    "zh-CN-XiaohanNeural": "甜美聊天声",
+    "zh-CN-XiaoruiNeural": "亲切老板娘声",
 }
 STABLE_MALE_VOICE = "zh-CN-YunxiNeural"
 STABLE_FEMALE_VOICE = "zh-CN-XiaoxiaoNeural"
-MALE_VOICES = {"zh-CN-YunjianNeural", "zh-CN-YunxiNeural", "zh-CN-YunyangNeural"}
+MALE_VOICES = {
+    "zh-CN-YunxiNeural",
+    "zh-CN-YunjianNeural",
+    "zh-CN-YunyangNeural",
+    "zh-CN-YunyeNeural",
+    "zh-CN-YunhaoNeural",
+    "zh-CN-YunfengNeural",
+}
 VOICE_FALLBACKS = {
     voice: (STABLE_MALE_VOICE if voice.startswith("zh-CN-Yun") else STABLE_FEMALE_VOICE)
     for voice in SUPPORTED_VOICES
