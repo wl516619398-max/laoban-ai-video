@@ -315,7 +315,7 @@ export default function Home() {
       const response = await fetch(`${getApiUrl()}/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, specialty: form.specialty, material_id: fileId }),
+        body: JSON.stringify({ ...form, specialty: form.specialty, material_id: fileId, voice }),
       });
       const payload = (await response.json().catch(() => ({}))) as GenerateResponse;
       if (!response.ok) {
