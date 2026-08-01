@@ -155,6 +155,16 @@ class VideoTaskRequest(BaseModel):
     user_id: str = Field(default=DEFAULT_USER_ID, min_length=1, max_length=64)
 
 
+class CreateVideoRequest(BaseModel):
+    """Stable MVP request shape for the frontend video-production button."""
+
+    store_info: dict[str, Any] = Field(default_factory=dict)
+    selected_plan: dict[str, Any] = Field(default_factory=dict)
+    video_files: list[Any] = Field(default_factory=list, max_length=20)
+    voice: str = Field(default="zh-CN-XiaoxiaoNeural", max_length=64)
+    user_id: str = Field(default=DEFAULT_USER_ID, min_length=1, max_length=64)
+
+
 class VoicePreviewRequest(BaseModel):
     voice: str = Field(min_length=1, max_length=64)
 
@@ -524,6 +534,43 @@ def create_video_task(request: VideoTaskRequest) -> dict[str, Any]:
         _update_video_task(task_id, "failed", error=str(error) or "视频制作任务提交失败，请稍后重试")
         raise HTTPException(status_code=500, detail="视频制作任务提交失败，请稍后重试") from error
     return _video_task_payload(row)
+
+
+@app.post("/api/create-video", status_code=202)
+@app.post("/api/video/generate", status_code=202)
+def create_video_from_plan(request: CreateVideoRequest) -> dict[str, Any]:
+    """Create a real video task from the selected plan and uploaded materials.
+
+    The existing /video-tasks endpoint remains the internal-compatible API;
+    this endpoint gives the frontend a simple store_info/selected_plan shape.
+    """
+    store_info = request.store_info
+    selected_plan = request.selected_plan
+
+    material_ids: list[str] = []
+    for item in request.video_files:
+        if isinstance(item, dict):
+            value = item.get("file_id") or item.get("material_id") or item.get("id")
+        else:
+            value = item
+        if value not in (None, ""):
+            material_ids.append(str(value))
+
+    script = str(selected_plan.get("script") or selected_plan.get("voiceover_script") or "").strip()
+    if not script:
+        raise HTTPException(status_code=422, detail="选中的方案缺少口播文案，请重新生成方案")
+    if not material_ids:
+        raise HTTPException(status_code=422, detail="请先上传视频素材")
+
+    task_request = VideoTaskRequest(
+        material_ids=list(dict.fromkeys(material_ids)),
+        script=script,
+        title=str(selected_plan.get("title") or selected_plan.get("theme") or "我的店铺短视频"),
+        shop_name=str(store_info.get("shop_name") or store_info.get("store_name") or "未命名店铺"),
+        voice=request.voice,
+        user_id=request.user_id,
+    )
+    return create_video_task(task_request)
 
 
 @app.get("/video-tasks")

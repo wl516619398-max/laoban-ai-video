@@ -113,35 +113,63 @@ def _extract_plans(payload: Any) -> Any:
 
 def _normalize_result(payload: Any) -> dict[str, Any]:
     raw_plans = _extract_plans(payload)
-    if not isinstance(raw_plans, list) or len(raw_plans) != 3:
+    if not isinstance(raw_plans, list) or not raw_plans:
         raise DeepSeekServiceError("AI 返回的方案数量不是 3 套")
+
+    # Keep the MVP contract stable even when the model returns fewer than three
+    # objects. Missing objects are filled with the corresponding direction and
+    # then normalized by the same fallback rules as missing fields.
+    raw_plans = list(raw_plans[:3])
+    while len(raw_plans) < 3:
+        raw_plans.append({})
 
     plans: list[dict[str, Any]] = []
     for index, raw_plan in enumerate(raw_plans):
         if not isinstance(raw_plan, dict):
-            raise DeepSeekServiceError(f"第 {index + 1} 套方案格式不正确")
+            raw_plan = {}
+
+        fallback_theme = f"{PLAN_TYPES[index]}短视频方案"
+        theme = str(_first_value(raw_plan, "theme", "video_theme", "视频主题", "今日短视频主题", "主题") or fallback_theme)
+        title = str(_first_value(raw_plan, "title", "video_title", "视频标题", "推荐标题", "发布标题") or theme)
+        hook = str(_first_value(raw_plan, "hook", "opening", "golden_opening", "前3秒黄金开头", "黄金3秒开头", "黄金开头") or title)
+        purpose = str(_first_value(raw_plan, "purpose", "suitable_for", "适合目的", "适合用途") or {
+            "老板故事型": "让附近顾客认识老板和店铺故事",
+            "产品展示型": "把产品特色和制作细节讲清楚",
+            "本地流量型": "吸引附近顾客自然到店",
+        }[PLAN_TYPES[index]])
+        visual = _first_value(raw_plan, "visual", "recommended_visual", "推荐画面", "画面建议", "视频画面")
+        materials_value = _first_value(raw_plan, "materials", "material_suggestions", "拍摄素材建议", "素材建议", "拍摄建议")
+        if materials_value in (None, "") and visual not in (None, ""):
+            materials_value = [visual]
+        if materials_value in (None, ""):
+            materials_value = ["店铺门头和环境", "产品或服务过程", "老板出镜分享"]
+        if isinstance(materials_value, str):
+            materials = [materials_value]
+        elif isinstance(materials_value, list):
+            materials = [str(material) for material in materials_value if str(material).strip()]
+        else:
+            materials = [str(materials_value)]
+        if not materials:
+            materials = ["店铺环境", "产品展示", "老板出镜"]
+        visual = str(visual or "、".join(materials))
+
+        script_value = _first_value(raw_plan, "script", "voiceover_script", "60秒口播脚本", "60秒脚本", "口播稿")
+        script = str(script_value or f"我是这家店的老板，今天想和你聊聊{title}。附近的朋友有空可以来店里坐坐。")
 
         plan = {
             "type": _first_value(raw_plan, "type", "plan_type", "方案类型") or PLAN_TYPES[index],
-            "theme": _first_value(raw_plan, "theme", "video_theme", "视频主题", "今日短视频主题", "主题"),
-            "hook": _first_value(raw_plan, "hook", "opening", "golden_opening", "前3秒黄金开头", "黄金3秒开头", "黄金开头") or "",
-            "title": _first_value(raw_plan, "title", "video_title", "视频标题", "推荐标题", "发布标题"),
-            "purpose": _first_value(raw_plan, "purpose", "suitable_for", "适合目的", "适合用途"),
-            "materials": _first_value(raw_plan, "materials", "material_suggestions", "拍摄素材建议", "素材建议", "拍摄建议"),
-            "script": _first_value(raw_plan, "script", "voiceover_script", "60秒口播脚本", "60秒脚本", "口播稿"),
+            "theme": theme,
+            "hook": hook,
+            "title": title,
+            "purpose": purpose,
+            "visual": visual,
+            "materials": materials,
+            "script": script,
             "storyboard": _first_value(raw_plan, "storyboard", "video_storyboard", "视频分镜", "分镜建议") or [],
             "caption": _first_value(raw_plan, "caption", "publish_copy", "发布文案", "文案") or "",
             "hashtags": _first_value(raw_plan, "hashtags", "hot_tags", "热门标签", "话题标签") or [],
         }
-        missing = [key for key in ("theme", "title", "purpose", "materials", "script") if plan[key] in (None, "")]
-        if missing:
-            raise DeepSeekServiceError(f"第 {index + 1} 套方案字段不完整：{', '.join(missing)}")
 
-        if isinstance(plan["materials"], str):
-            plan["materials"] = [plan["materials"]]
-        if not isinstance(plan["materials"], list):
-            raise DeepSeekServiceError(f"第 {index + 1} 套方案的拍摄素材建议格式不正确")
-        plan["materials"] = [str(material) for material in plan["materials"]]
         if isinstance(plan["storyboard"], str):
             plan["storyboard"] = [plan["storyboard"]]
         if not isinstance(plan["storyboard"], list):
@@ -156,7 +184,7 @@ def _normalize_result(payload: Any) -> dict[str, Any]:
     return {
         "plans": plans,
         # Keep the previous top-level fields mapped to the first plan for compatibility.
-        **{key: plans[0][key] for key in ("theme", "hook", "title", "script", "storyboard", "caption", "hashtags")},
+        **{key: plans[0][key] for key in ("theme", "hook", "title", "script", "visual", "storyboard", "caption", "hashtags")},
     }
 
 

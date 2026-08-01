@@ -8,11 +8,13 @@ B. 产品展示型
 C. 本地流量型
 
 每套方案必须生成以下内容：
-1. 视频主题
-2. 推荐标题
-3. 适合目的
-4. 拍摄素材建议
-5. 60秒脚本
+1. title：推荐标题
+2. hook：前3秒吸引点
+3. script：完整口播文案
+4. visual：推荐画面
+5. purpose：视频目的
+6. 视频主题
+7. 拍摄素材建议
 
 创作要求：
 - 必须使用老板第一人称口吻，像老板自己拿手机拍摄、自己说话，不能像探店博主或新闻主持人。
@@ -34,4 +36,4 @@ C. 本地流量型
 - 发布标题、发布文案和话题标签也要保持老板第一人称和本地生活语气，不要写成品牌广告或探店稿。
 - 老板故事型重点讲经营经历、坚持和熟客关系；产品展示型重点讲产品细节、制作过程和体验；本地流量型重点讲城市认知、附近场景和自然到店理由。三套方案不能只是换标题，角度必须明显不同。
 - 只返回合法 JSON，不要使用 Markdown 代码块。
-- JSON 顶层必须只有 plans 数组，且必须包含 3 个方案。每个方案必须使用 type、theme、hook、title、purpose、materials、script、storyboard、caption、hashtags 字段。
+- JSON 顶层必须只有 plans 数组，且必须包含 3 个方案。每个方案必须使用 type、theme、title、hook、script、visual、purpose、materials、storyboard、caption、hashtags 字段。

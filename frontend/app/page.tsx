@@ -2,6 +2,7 @@
 
 import { ChangeEvent, FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { getApiUrl } from "../lib/api";
+import VideoProductionPanel from "./video-production-panel";
 
 type FormValues = {
   shop_name: string;
@@ -16,6 +17,7 @@ type VideoPlan = {
   theme?: string;
   hook?: string;
   title?: string;
+  visual?: string;
   purpose?: string;
   materials?: string[];
   script?: string;
@@ -64,6 +66,41 @@ const initialForm: FormValues = {
 
 const UPLOAD_TIMEOUT_MS = 5 * 60 * 1000;
 
+function uploadFileWithProgress(file: File, onProgress: (progress: number) => void) {
+  return new Promise<{ file_id: string }>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const body = new FormData();
+    body.append("file", file);
+    const uploadUrl = `${getApiUrl()}/upload`;
+
+    xhr.open("POST", uploadUrl);
+    xhr.timeout = UPLOAD_TIMEOUT_MS;
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
+    };
+    xhr.onload = () => {
+      console.log("[upload] response", { status: xhr.status, ok: xhr.status >= 200 && xhr.status < 300 });
+      const payload = (() => {
+        try {
+          return JSON.parse(xhr.responseText || "{}");
+        } catch {
+          return {};
+        }
+      })() as { file_id?: string; detail?: string };
+      if (xhr.status < 200 || xhr.status >= 300 || !payload.file_id) {
+        reject(new Error(getErrorMessage(payload, "上传失败，请稍后重试。")));
+        return;
+      }
+      onProgress(100);
+      resolve({ file_id: String(payload.file_id) });
+    };
+    xhr.onerror = () => reject(new Error("上传失败，请稍后重试。"));
+    xhr.ontimeout = () => reject(new Error("上传超时，请稍后重试。"));
+    xhr.onabort = () => reject(new Error("上传已取消，请稍后重试。"));
+    xhr.send(body);
+  });
+}
+
 function getErrorMessage(payload: unknown, fallback: string) {
   if (typeof payload === "object" && payload !== null && "detail" in payload) {
     const detail = String(payload.detail || "");
@@ -101,7 +138,7 @@ async function copyText(text: string) {
   if (!copied) throw new Error("copy failed");
 }
 
-function PlanCard({ plan, index }: { plan: VideoPlan; index: number }) {
+function PlanCard({ plan, index, selected, onSelect }: { plan: VideoPlan; index: number; selected: boolean; onSelect: () => void }) {
   const [copied, setCopied] = useState(false);
 
   const copyScript = async () => {
@@ -115,7 +152,7 @@ function PlanCard({ plan, index }: { plan: VideoPlan; index: number }) {
   };
 
   return (
-    <article className="plan-card">
+    <article className={`plan-card ${selected ? "plan-card-selected" : ""}`}>
       <div className="plan-card-header">
         <span className="plan-number">方案 {index + 1}</span>
         <span className="plan-type">{plan.type || "短视频方案"}</span>
@@ -152,6 +189,7 @@ function PlanCard({ plan, index }: { plan: VideoPlan; index: number }) {
         <summary>查看更多方案信息</summary>
         <div className="more-content">
           {plan.purpose && <p><strong>适合目的：</strong>{plan.purpose}</p>}
+          {plan.visual && <p><strong>推荐画面：</strong>{plan.visual}</p>}
           {!!plan.caption && <p><strong>发布文案：</strong>{plan.caption}</p>}
           {!!plan.materials?.length && <p><strong>拍摄建议：</strong>{plan.materials.join("、")}</p>}
           {!!plan.hashtags?.length && <p><strong>话题：</strong>{plan.hashtags.join(" ")}</p>}
@@ -167,6 +205,9 @@ function PlanCard({ plan, index }: { plan: VideoPlan; index: number }) {
       }}>
         复制完整方案
       </button>
+      <button type="button" className="select-plan-button" onClick={onSelect} aria-pressed={selected}>
+        {selected ? "已选择此方案" : "选择此方案"}
+      </button>
     </article>
   );
 }
@@ -177,8 +218,11 @@ export default function Home() {
   const [fileId, setFileId] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploaded, setUploaded] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
+  const [uploadFailed, setUploadFailed] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [plans, setPlans] = useState<VideoPlan[]>([]);
+  const [selectedPlanIndex, setSelectedPlanIndex] = useState<number | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [usageLoading, setUsageLoading] = useState(true);
@@ -202,6 +246,10 @@ export default function Home() {
       setUsageLoading(false);
     }
   }, []);
+
+  const handleGenerationSuccess = useCallback(() => {
+    void refreshUsage();
+  }, [refreshUsage]);
 
   useEffect(() => {
     const loadInitialUsage = async () => {
@@ -249,6 +297,8 @@ export default function Home() {
     if (!isSupported) {
       setSelectedFile(null);
       setUploaded(false);
+      setUploadProgress(0);
+      setUploadFailed(true);
       setFileId("");
       setError("请选择 MP4 或 MOV 格式的视频素材。");
       return;
@@ -256,6 +306,8 @@ export default function Home() {
 
     setSelectedFile(file);
     setUploaded(false);
+    setUploadProgress(0);
+    setUploadFailed(false);
     setFileId("");
     setError("");
     setPlans([]);
@@ -264,33 +316,26 @@ export default function Home() {
 
   const uploadFile = async (file: File) => {
     setUploading(true);
+    setUploadProgress(0);
+    setUploadFailed(false);
     setMessage("正在上传素材...");
     setError("");
     const uploadUrl = `${getApiUrl()}/upload`;
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
     console.log("[upload] start", { url: uploadUrl, filename: file.name, size: file.size, timeoutMs: UPLOAD_TIMEOUT_MS });
 
     try {
-      const body = new FormData();
-      body.append("file", file);
-      const response = await fetch(uploadUrl, { method: "POST", body, signal: controller.signal });
-      console.log("[upload] response", { status: response.status, ok: response.ok });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.file_id) {
-        throw new Error(getErrorMessage(payload, "上传失败，请稍后重试。"));
-      }
-      console.log("[upload] success", { fileId: payload.file_id, filename: payload.filename || file.name });
-      setFileId(String(payload.file_id));
+      const payload = await uploadFileWithProgress(file, (progress) => setUploadProgress(progress));
+      console.log("[upload] success", { fileId: payload.file_id, filename: file.name });
+      setFileId(payload.file_id);
       setUploaded(true);
       setMessage("上传成功，可以生成视频方案了。");
     } catch (uploadError) {
       console.error("[upload] failed", uploadError);
       setUploaded(false);
+      setUploadFailed(true);
       setError(uploadError instanceof DOMException && uploadError.name === "AbortError" ? "上传超时，请稍后重试。" : uploadError instanceof Error ? uploadError.message : "上传失败，请稍后重试。");
       setMessage("");
     } finally {
-      window.clearTimeout(timeoutId);
       setUploading(false);
     }
   };
@@ -325,6 +370,7 @@ export default function Home() {
         throw new Error("暂时没有生成方案，请稍后重试。");
       }
       setPlans(payload.plans.slice(0, 3));
+      setSelectedPlanIndex(null);
       setMessage("已生成三套视频方案，请选择最适合你店铺的一套。");
       try {
         await refreshUsage();
@@ -428,8 +474,9 @@ export default function Home() {
         <label className={`upload-box ${uploaded ? "upload-success" : ""}`}>
           <input type="file" accept=".mp4,.mov,video/mp4,video/quicktime" onChange={handleFileChange} disabled={uploading} />
           <span className="upload-icon">↑</span>
-          <strong>{uploading ? "正在上传..." : selectedFile ? selectedFile.name : "点击选择视频素材"}</strong>
-          <small>{uploaded ? "上传成功" : "支持 MP4、MOV，建议上传店铺环境或产品视频"}</small>
+          <strong>{uploading ? `正在上传视频 ${uploadProgress}%` : selectedFile ? selectedFile.name : "点击选择视频素材"}</strong>
+          {uploading && <div className="upload-progress-track" aria-label={`上传进度 ${uploadProgress}%`}><span style={{ width: `${uploadProgress}%` }} /></div>}
+          <small>{uploading ? `${uploadProgress}%` : uploaded ? "上传成功" : uploadFailed ? "上传失败，请重新选择视频" : "支持 MP4、MOV，建议上传店铺环境或产品视频"}</small>
         </label>
 
         {message && <p className="status-message">{message}</p>}
@@ -451,8 +498,19 @@ export default function Home() {
             <p>三套方案风格不同，你可以直接复制口播文案使用。</p>
           </div>
           <div className="plans-grid">
-            {plans.map((plan, index) => <PlanCard key={`${plan.type || "plan"}-${index}`} plan={plan} index={index} />)}
+            {plans.map((plan, index) => <PlanCard key={`${plan.type || "plan"}-${index}`} plan={plan} index={index} selected={selectedPlanIndex === index} onSelect={() => setSelectedPlanIndex(index)} />)}
           </div>
+          {selectedPlanIndex !== null && plans[selectedPlanIndex] && <VideoProductionPanel
+            key={`${selectedPlanIndex}-${plans[selectedPlanIndex].title || plans[selectedPlanIndex].theme || "plan"}`}
+            plan={plans[selectedPlanIndex]}
+            storeInfo={form}
+            materialIds={fileId ? [fileId] : []}
+            shopName={form.shop_name}
+            voice={voice}
+            userId="legacy-anonymous-user"
+            remainingCount={remainingCount}
+            onGenerationSuccess={handleGenerationSuccess}
+          />}
         </section>
       )}
 
