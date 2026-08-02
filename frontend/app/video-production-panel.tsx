@@ -62,6 +62,7 @@ export default function VideoProductionPanel({
   plan,
   storeInfo,
   materialIds,
+  materialNames,
   shopName,
   voice,
   userId,
@@ -71,6 +72,7 @@ export default function VideoProductionPanel({
   plan: VideoPlan;
   storeInfo: Record<string, string>;
   materialIds: string[];
+  materialNames: string[];
   shopName: string;
   voice: string;
   userId: string;
@@ -205,6 +207,7 @@ export default function VideoProductionPanel({
           <span className="eyebrow">视频制作</span>
           <h3>确认文案，生成你的短视频</h3>
           <p>可以先修改口播内容，确认后会自动完成配音、字幕、混剪和封面。</p>
+          <p className="production-waiting">本次使用 {materialNames.length} 个视频素材</p>
         </div>
         {status === "idle" && <button type="button" className="generate-button" onClick={() => void startProduction()} disabled={!userId || !materialIds.length || remainingCount === null || remainingCount === 0}>🎬 开始生成视频</button>}
         {status === "idle" && materialIds.length === 0 && <p className="production-waiting">上传素材完成后，可以开始生成视频。</p>}

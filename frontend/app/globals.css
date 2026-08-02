@@ -85,6 +85,13 @@ button, input, select, textarea { font: inherit; }
 .upload-box small { color: #8492a5; font-size: 0.8rem; }
 .upload-progress-track { width: min(100%, 24rem); height: 0.55rem; overflow: hidden; border-radius: 999px; background: #dbe7f5; }
 .upload-progress-track span { display: block; height: 100%; border-radius: inherit; background: #2563eb; transition: width 160ms ease; }
+.material-list { display: grid; gap: 0.65rem; margin-top: 1rem; }
+.material-item { border: 1px solid #e0e7f0; border-radius: 0.75rem; background: #fbfdff; padding: 0.75rem; }
+.material-item-header { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; color: #334155; font-size: 0.82rem; font-weight: 700; }
+.material-item-header span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.material-item-header button { flex: 0 0 auto; border: 0; background: transparent; color: #c23b3b; cursor: pointer; font-size: 0.75rem; font-weight: 800; }
+.material-item-status { margin-top: 0.45rem; color: #6b7a90; font-size: 0.75rem; }
+.material-item .upload-progress-track { width: 100%; margin-top: 0.45rem; }
 .status-message { margin: 1rem 0 0; color: #2563eb; font-size: 0.9rem; font-weight: 700; text-align: center; }
 .error-message { margin: 1rem 0 0; border-radius: 0.7rem; background: #fff1f1; padding: 0.75rem 1rem; color: #c23b3b; font-size: 0.88rem; text-align: center; }
 .action-row { display: flex; align-items: center; gap: 1rem; margin-top: 1.25rem; }

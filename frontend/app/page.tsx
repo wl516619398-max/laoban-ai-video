@@ -27,6 +27,14 @@ type VideoPlan = {
 };
 
 type GenerateResponse = { plans?: VideoPlan[]; detail?: string };
+type MaterialUploadStatus = "等待上传" | "上传中" | "上传完成" | "上传失败";
+type MaterialUpload = {
+  id: string;
+  file: File;
+  fileId: string;
+  progress: number;
+  status: MaterialUploadStatus;
+};
 type UsageResponse = {
   app_env?: string;
   daily_limit?: number;
@@ -109,6 +117,47 @@ function getErrorMessage(payload: unknown, fallback: string) {
     }
   }
   return fallback;
+}
+
+function parsePlansResponse(payload: unknown): VideoPlan[] {
+  const parse = (value: unknown, depth = 0): VideoPlan[] => {
+    if (depth > 5 || value === null || value === undefined) return [];
+    if (Array.isArray(value)) return value.filter((item): item is VideoPlan => typeof item === "object" && item !== null).slice(0, 3);
+    if (typeof value === "string") {
+      const text = value.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+      try {
+        return parse(JSON.parse(text), depth + 1);
+      } catch {
+        return [];
+      }
+    }
+    if (typeof value !== "object") return [];
+
+    const record = value as Record<string, unknown>;
+    for (const key of ["plans", "video_plans", "方案", "方案列表", "短视频方案"]) {
+      const plans = parse(record[key], depth + 1);
+      if (plans.length) return plans;
+    }
+    for (const key of ["data", "result", "output", "内容"]) {
+      const plans = parse(record[key], depth + 1);
+      if (plans.length) return plans;
+    }
+
+    const namedPlans = Object.entries(record)
+      .map(([key, plan]) => {
+        const normalized = key.replace(/[\s_\-:：，,。·/]+/g, "").toLowerCase();
+        const order = normalized.match(/^(?:方案|plan)?([123])$/)?.[1] ||
+          ({ a: "1", b: "2", c: "3" } as Record<string, string>)[normalized];
+        return order && typeof plan === "object" && plan !== null ? { order: Number(order), plan: plan as VideoPlan } : null;
+      })
+      .filter((item): item is { order: number; plan: VideoPlan } => Boolean(item))
+      .sort((left, right) => left.order - right.order)
+      .map((item) => item.plan)
+      .slice(0, 3);
+    return namedPlans;
+  };
+
+  return parse(payload);
 }
 
 function planText(plan: VideoPlan) {
@@ -214,12 +263,8 @@ function PlanCard({ plan, index, selected, onSelect }: { plan: VideoPlan; index:
 
 export default function Home() {
   const [form, setForm] = useState<FormValues>(initialForm);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [fileId, setFileId] = useState("");
+  const [materials, setMaterials] = useState<MaterialUpload[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [uploaded, setUploaded] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<number>(0);
-  const [uploadFailed, setUploadFailed] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [plans, setPlans] = useState<VideoPlan[]>([]);
   const [selectedPlanIndex, setSelectedPlanIndex] = useState<number | null>(null);
@@ -289,60 +334,62 @@ export default function Home() {
     });
   };
 
-  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    const isSupported = /\.(mp4|mov)$/i.test(file.name) || ["video/mp4", "video/quicktime"].includes(file.type);
-    if (!isSupported) {
-      setSelectedFile(null);
-      setUploaded(false);
-      setUploadProgress(0);
-      setUploadFailed(true);
-      setFileId("");
-      setError("请选择 MP4 或 MOV 格式的视频素材。");
-      return;
-    }
-
-    setSelectedFile(file);
-    setUploaded(false);
-    setUploadProgress(0);
-    setUploadFailed(false);
-    setFileId("");
-    setError("");
-    setPlans([]);
-    void uploadFile(file);
+  const updateMaterial = (id: string, patch: Partial<MaterialUpload>) => {
+    setMaterials((current) => current.map((material) => material.id === id ? { ...material, ...patch } : material));
   };
 
-  const uploadFile = async (file: File) => {
-    setUploading(true);
-    setUploadProgress(0);
-    setUploadFailed(false);
+  const uploadMaterial = async (material: MaterialUpload) => {
+    updateMaterial(material.id, { status: "上传中", progress: 0 });
     setMessage("正在上传素材...");
     setError("");
     const uploadUrl = `${getApiUrl()}/upload`;
-    console.log("[upload] start", { url: uploadUrl, filename: file.name, size: file.size, timeoutMs: UPLOAD_TIMEOUT_MS });
+    console.log("[upload] start", { url: uploadUrl, filename: material.file.name, size: material.file.size, timeoutMs: UPLOAD_TIMEOUT_MS });
 
     try {
-      const payload = await uploadFileWithProgress(file, (progress) => setUploadProgress(progress));
-      console.log("[upload] success", { fileId: payload.file_id, filename: file.name });
-      setFileId(payload.file_id);
-      setUploaded(true);
-      setMessage("上传成功，可以生成视频方案了。");
+      const payload = await uploadFileWithProgress(material.file, (progress) => updateMaterial(material.id, { progress }));
+      console.log("[upload] success", { fileId: payload.file_id, filename: material.file.name });
+      updateMaterial(material.id, { fileId: payload.file_id, progress: 100, status: "上传完成" });
     } catch (uploadError) {
       console.error("[upload] failed", uploadError);
-      setUploaded(false);
-      setUploadFailed(true);
+      updateMaterial(material.id, { status: "上传失败" });
       setError(uploadError instanceof DOMException && uploadError.name === "AbortError" ? "上传超时，请稍后重试。" : uploadError instanceof Error ? uploadError.message : "上传失败，请稍后重试。");
-      setMessage("");
-    } finally {
-      setUploading(false);
     }
+  };
+
+  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (!selectedFiles.length) return;
+
+    const validFiles = selectedFiles.filter((file) => /\.(mp4|mov)$/i.test(file.name) || ["video/mp4", "video/quicktime"].includes(file.type));
+    if (validFiles.length !== selectedFiles.length) {
+      setError("部分文件不是 MP4 或 MOV 格式，已跳过不支持的文件。");
+    } else {
+      setError("");
+    }
+    if (!validFiles.length) return;
+
+    const newMaterials = validFiles.map((file, index) => ({
+      id: `${file.name}-${file.lastModified}-${Date.now()}-${index}`,
+      file,
+      fileId: "",
+      progress: 0,
+      status: "等待上传" as MaterialUploadStatus,
+    }));
+    setMaterials((current) => [...current, ...newMaterials]);
+    setUploading(true);
+    void Promise.all(newMaterials.map((material) => uploadMaterial(material))).finally(() => setUploading(false));
+  };
+
+  const removeMaterial = (id: string) => {
+    setMaterials((current) => current.filter((material) => material.id !== id));
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!fileId || uploading) {
+    const uploadedMaterialIds = materials.filter((material) => material.status === "上传完成" && material.fileId).map((material) => material.fileId);
+    const allUploadsCompleted = materials.length > 0 && uploadedMaterialIds.length === materials.length;
+    if (!allUploadsCompleted || uploading) {
       setError("请先上传一个 MP4 或 MOV 视频素材。");
       return;
     }
@@ -360,18 +407,19 @@ export default function Home() {
       const response = await fetch(`${getApiUrl()}/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, specialty: form.specialty, material_id: fileId, voice }),
+        body: JSON.stringify({ ...form, specialty: form.specialty, material_id: uploadedMaterialIds[0], voice }),
       });
-      const payload = (await response.json().catch(() => ({}))) as GenerateResponse;
+      const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(getErrorMessage(payload, "生成失败，请稍后重试。"));
       }
-      if (!Array.isArray(payload.plans) || payload.plans.length === 0) {
+      const parsedPlans = parsePlansResponse(payload);
+      if (!parsedPlans.length) {
         throw new Error("暂时没有生成方案，请稍后重试。");
       }
-      setPlans(payload.plans.slice(0, 3));
+      setPlans(parsedPlans);
       setSelectedPlanIndex(null);
-      setMessage("已生成三套视频方案，请选择最适合你店铺的一套。");
+      setMessage(`已生成 ${parsedPlans.length} 套视频方案，请选择最适合你店铺的一套。`);
       try {
         await refreshUsage();
       } catch {
@@ -386,6 +434,8 @@ export default function Home() {
   };
 
   const canGenerate = !usageLoading && remainingCount !== null && remainingCount > 0;
+  const uploadedMaterialIds = materials.filter((material) => material.status === "上传完成" && material.fileId).map((material) => material.fileId);
+  const allUploadsCompleted = materials.length > 0 && uploadedMaterialIds.length === materials.length;
   const usageLabel = usageLoading
     ? "今日体验：正在获取次数"
     : remainingCount === 0
@@ -471,19 +521,27 @@ export default function Home() {
 
         <div className="step-title second-step"><span>2</span><div><h2>上传视频素材</h2><p>上传店里随手拍的视频即可，支持 MP4、MOV 格式。</p></div></div>
 
-        <label className={`upload-box ${uploaded ? "upload-success" : ""}`}>
-          <input type="file" accept=".mp4,.mov,video/mp4,video/quicktime" onChange={handleFileChange} disabled={uploading} />
+        <label className={`upload-box ${allUploadsCompleted ? "upload-success" : ""}`}>
+          <input type="file" accept=".mp4,.mov,video/mp4,video/quicktime" multiple onChange={handleFileChange} />
           <span className="upload-icon">↑</span>
-          <strong>{uploading ? `正在上传视频 ${uploadProgress}%` : selectedFile ? selectedFile.name : "点击选择视频素材"}</strong>
-          {uploading && <div className="upload-progress-track" aria-label={`上传进度 ${uploadProgress}%`}><span style={{ width: `${uploadProgress}%` }} /></div>}
-          <small>{uploading ? `${uploadProgress}%` : uploaded ? "上传成功" : uploadFailed ? "上传失败，请重新选择视频" : "支持 MP4、MOV，建议上传店铺环境或产品视频"}</small>
+          <strong>{materials.length ? `已选择 ${materials.length} 个视频素材` : "点击选择视频素材"}</strong>
+          <small>支持一次选择多个视频，也可以继续添加素材</small>
         </label>
+
+        {materials.length > 0 && <div className="material-list">
+          {materials.map((material) => <div className="material-item" key={material.id}>
+            <div className="material-item-header"><span title={material.file.name}>{material.file.name}</span><button type="button" onClick={() => removeMaterial(material.id)}>删除</button></div>
+            <div className="material-item-status">{material.status === "上传中" ? `正在上传 ${material.progress}%` : material.status}</div>
+            <div className="upload-progress-track"><span style={{ width: `${material.progress}%` }} /></div>
+          </div>)}
+          {allUploadsCompleted && <p className="status-message">已上传 {materials.length} 个视频素材，可以生成方案。</p>}
+        </div>}
 
         {message && <p className="status-message">{message}</p>}
         {error && <p className="error-message" role="alert">{error}</p>}
 
         <div className="action-row">
-          <button className="generate-button" type="submit" disabled={!uploaded || uploading || generating || usageLoading || remainingCount === null || remainingCount === 0}>
+          <button className="generate-button" type="submit" disabled={!allUploadsCompleted || uploading || generating || usageLoading || remainingCount === null || remainingCount === 0}>
             {generating ? "正在生成方案..." : "生成短视频方案"}
           </button>
           <span className="action-hint">{usageLoading ? "正在获取次数" : remainingCount === null ? "次数暂时无法获取" : canGenerate ? "AI 将为你生成 3 套方案" : "当前暂不能生成，请稍后再试"}</span>
@@ -504,7 +562,8 @@ export default function Home() {
             key={`${selectedPlanIndex}-${plans[selectedPlanIndex].title || plans[selectedPlanIndex].theme || "plan"}`}
             plan={plans[selectedPlanIndex]}
             storeInfo={form}
-            materialIds={fileId ? [fileId] : []}
+            materialIds={uploadedMaterialIds}
+            materialNames={materials.map((material) => material.file.name)}
             shopName={form.shop_name}
             voice={voice}
             userId="legacy-anonymous-user"

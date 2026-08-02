@@ -92,36 +92,52 @@ def _parse_model_content(content: Any) -> Any:
 def _extract_plans(payload: Any) -> Any:
     if isinstance(payload, list):
         return payload
+    if isinstance(payload, str):
+        try:
+            return _extract_plans(json.loads(payload))
+        except json.JSONDecodeError:
+            return None
     if not isinstance(payload, dict):
         return None
 
     raw_plans = _first_value(payload, "plans", "video_plans", "方案", "方案列表", "短视频方案")
     if raw_plans is not None:
-        return raw_plans
+        extracted = _extract_plans(raw_plans)
+        if extracted is not None:
+            return extracted
 
     for container_key in ("data", "result", "output", "内容"):
-        nested = payload.get(container_key)
+        nested = _first_value(payload, container_key)
         nested_plans = _extract_plans(nested)
         if nested_plans is not None:
             return nested_plans
 
+    indexed_plans: dict[int, Any] = {}
+    for key, value in payload.items():
+        normalized_key = re.sub(r"[\s_\-:：，,。·/]+", "", str(key)).lower()
+        match = re.fullmatch(r"(?:方案|plan)?([123])", normalized_key)
+        if match:
+            indexed_plans[int(match.group(1))] = value
+        elif normalized_key in {"a", "b", "c"}:
+            indexed_plans[{"a": 1, "b": 2, "c": 3}[normalized_key]] = value
+
+    if indexed_plans:
+        return [indexed_plans[index] for index in sorted(indexed_plans)]
+
     named_plans = [_first_value(payload, plan_type, plan_type.replace("型", "")) for plan_type in PLAN_TYPES]
-    if all(isinstance(plan, dict) for plan in named_plans):
-        return named_plans
-    return None
+    return [plan for plan in named_plans if isinstance(plan, dict)] or None
 
 
 def _normalize_result(payload: Any) -> dict[str, Any]:
     raw_plans = _extract_plans(payload)
-    if not isinstance(raw_plans, list) or not raw_plans:
+    if not isinstance(raw_plans, list):
         raise DeepSeekServiceError("AI 返回的方案数量不是 3 套")
+    if not raw_plans:
+        return {"plans": []}
 
-    # Keep the MVP contract stable even when the model returns fewer than three
-    # objects. Missing objects are filled with the corresponding direction and
-    # then normalized by the same fallback rules as missing fields.
+    # Keep the MVP contract stable while allowing one or two valid plans to be
+    # displayed when the model returns fewer than three.
     raw_plans = list(raw_plans[:3])
-    while len(raw_plans) < 3:
-        raw_plans.append({})
 
     plans: list[dict[str, Any]] = []
     for index, raw_plan in enumerate(raw_plans):
