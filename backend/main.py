@@ -535,7 +535,7 @@ def create_video_task(request: VideoTaskRequest) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail="视频制作任务提交失败，请稍后重试") from error
     return _video_task_payload(row)
 
-
+# Public frontend contract: keep the video generation endpoint at this path.
 @app.post("/api/create-video", status_code=202)
 @app.post("/api/video/generate", status_code=202)
 def create_video_from_plan(request: CreateVideoRequest) -> dict[str, Any]:
