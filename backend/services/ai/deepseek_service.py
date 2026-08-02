@@ -268,6 +268,9 @@ JSON 字段必须是 plans，且必须严格包含 3 个方案，类型依次为
     try:
         with urlopen(request, timeout=90) as response:
             response_body = response.read().decode("utf-8")
+            print("========== AI RAW RESPONSE ==========", flush=True)
+            print(response_body, flush=True)
+            print("========== END RESPONSE ==========", flush=True)
             response_payload = json.loads(response_body)
     except HTTPError as error:
         detail = error.read().decode("utf-8", errors="replace")[:300]
